@@ -6,20 +6,21 @@ import pygame
 import pygame.display as display
 import pygame.event as events
 import pygame.draw as draw
+import pygame.image as image
 from pygame.time import Clock
 
 
-## Utilities
-
-# A 2-d vector or point
+# A simple 2-d vector or point implementation for utility purposes
+# Allows +, -, with other vectors or number pairs and *, / operations with numbers
 class Vec2d:
-    def __init__(self, x=0, y=0):
+    def __init__(self, x=.0, y=.0):
         self.x = x
         self.y = y
 
     def __str__(self):
         return '(%d, %d)' % (self.x, self.y)
 
+    # Adds another vector or a pair of numbers
     def __add__(self, other):
         if isinstance(other, Vec2d):
             return Vec2d(self.x + other.x, self.y + other.y)
@@ -28,6 +29,7 @@ class Vec2d:
         else:
             raise ValueError('Unsupported type for Vec2d `+` operator')
 
+    # Subtracts another vector or a pair of numbers from this vector
     def __sub__(self, other):
         if isinstance(other, Vec2d):
             return Vec2d(self.x - other.x, self.y - other.y)
@@ -36,12 +38,14 @@ class Vec2d:
         else:
             raise ValueError('Unsupported type for Vec2d `-` operator')
 
+    # Multiplies each component of this vector by the given scalar
     def __mul__(self, other):
         if isinstance(other, (int, float)):
             return Vec2d(self.x * other, self.y * other)
         else:
             raise ValueError('Unsupported type for Vec2d `*` operator')
 
+    # Divides each component of this vector by the given scalar
     def __div__(self, other):
         if isinstance(other, (int, float)):
             return Vec2d(self.x / other, self.y / other)
@@ -63,52 +67,60 @@ def mapf(value: float, a=(0, 1), b=(0, 1)) -> float:
 
 
 # Colors
-BLACK = (0, 0, 0)
-DARKER_GREY = (31, 31, 31)
-DARK_GREY = (63, 63, 63)
-GREY = (127, 127, 127)
-LIGHT_GREY = (190, 190, 190)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-GREEN = (0, 255, 0)
-BLUE = (0, 0, 255)
-NICE_RED = (220, 40, 40)
-NICE_GREEN = (40, 220, 110)
-NICE_BLUE = (0, 140, 230)
+BLACK       = (   0,   0,   0 )
+DARKER_GREY = (  31,  31,  31 )
+DARK_GREY   = (  63,  63,  63 )
+GREY        = ( 127, 127, 127 )
+LIGHT_GREY  = ( 190, 190, 190 )
+WHITE       = ( 255, 255, 255 )
+RED         = ( 255,   0,   0 )
+GREEN       = (   0, 255,   0 )
+BLUE        = (   0,   0, 255 )
+NICE_RED    = ( 220,  40,  40 )
+NICE_GREEN  = (  40, 220, 110 )
+NICE_BLUE   = (   0, 140, 230 )
 
 # Display dimensions
-WIDTH = 800
+WIDTH  = 800
 HEIGHT = 800
 # Window title
-TITLE = 'Fourier Drawing'
+TITLE  = 'Fourier Drawing'
+# Whether to output each frame to a file
+EXPORT = False
 # Frames per second
 framerate = 30
+# Number of rendered frames
+frame = 0
 
 # Constants
 MINDIM = min(WIDTH, HEIGHT)
 MIDDLE = Vec2d(WIDTH / 2, HEIGHT / 2)
 
 
-#region SKETCH
+#region Sketch
 
+# Stores a single result of the discrete fourier transform function
 class Wave:
-    def __init__(self, freq: float, amp: float, phase: float):
-        self.freq = freq
-        self.amp = amp
-        self.phase = phase
+
+    # Calculates and stores wave parameters based on the given frequency index
+    # and complex result of the discrete fourier transform of that index
+    def __init__(self, k: int, X_k: complex):
+        self.freq = k
+        self.amp = sqrt(X_k.real ** 2 + X_k.imag ** 2)
+        self.phase = atan2(X_k.imag, X_k.real)
 
     def __str__(self):
         return 'Wave(freq=%.5f, amp=%.5f, phase=%.5f)' % (self.freq, self.amp, self.phase)
 
 
 # Discrete Fourier Transform
-def dft(x: List[complex]) -> List[Wave]:
+def dft(x: List[complex]) -> List[complex]:
 
     # X_k = sum_{n=0}^{N-1} x_n * (cos(2*pi*kn/N) - i * sin(2*pi*kn/N))
     # https://en.wikipedia.org/wiki/Discrete_Fourier_transform#Definition
 
     N = len(x)
-    waves = []
+    X = []
 
     for k in range(N):
         X_k = 0
@@ -116,14 +128,10 @@ def dft(x: List[complex]) -> List[Wave]:
             phi = 2.0 * PI * k * n / N
             X_k += x_n * complex(cos(phi), -sin(phi))
 
-        X_k /= N
+        X_k /= N  # take the average
+        X.append(X_k)
 
-        amp = sqrt(X_k.real ** 2 + X_k.imag ** 2)
-        phase = atan2(X_k.imag, X_k.real)
-
-        waves.append(Wave(k, amp, phase))
-
-    return waves
+    return X
 
 
 def sample(func, n, full=False) -> Iterator:
@@ -131,6 +139,7 @@ def sample(func, n, full=False) -> Iterator:
         yield func(i / n)
 
 
+# Angle function for a square path
 def square_t(t: float) -> Tuple[float, float]:
     t = t % 1 * PI * 2
     a = abs(cos(t))
@@ -139,30 +148,52 @@ def square_t(t: float) -> Tuple[float, float]:
     return (r * cos(t), r * sin(t))
 
 
+# Angle function for a circle path
 def circle_t(t: float) -> Tuple[float, float]:
     t = t % 1 * PI * 2
     return (cos(t), sin(t))
 
 
+#region Parameters
+
+# The path function to sample
+FUNC = square_t
+# How many samples to take of the path function
 SAMPLES = 200
+# How many trail points to keep at most
+TRAIL_LENGTH = SAMPLES - 10
+# The radius of a path-tracing circle for amplitude 1
 SCALE = MINDIM / 2 - 100
-original_path = []  # type: List[Tuple[float, float]]
-waves = []          # type: List[Wave]
-trail = []          # type: List[Tuple[float, float]]
-t = 0               # type: float
+# The original sampled path to re-draw at the beginning of the draw loop
+original_path = []
+# The result of the discrete Fourier transform computed in setup
+waves = []
+# Points of the path traced by the epicycles
+trail = []
+# Elapsed time
+t = 0
+# Time step
+dt = 0
+
+#endregion
 
 
+# Calculates stuff and sets things up
 def setup() -> bool:
-    global original_path, waves
+    global original_path, waves, dt
 
-    sampled = list(sample(square_t, SAMPLES))
+    sampled = list(sample(FUNC, SAMPLES))
 
     original_path = [(MIDDLE + Vec2d(*p) * SCALE).float_tuple for p in sampled]
 
-    waves = dft([complex(*p) for p in sampled])
+    fourier = dft([complex(*p) for p in sampled])
+    waves = [Wave(k, X_k) for k, X_k in enumerate(fourier)]
     waves = sorted(waves, key=lambda w: w.amp, reverse=True)
 
+    dt = PI * 2 / len(waves)
 
+
+# Called each frame to render and update the sketch
 def show(screen):
     global t
 
@@ -188,15 +219,14 @@ def show(screen):
 
     # Trail
     trail.append(origin.float_tuple)
-    if len(trail) > SAMPLES:
+    if len(trail) > TRAIL_LENGTH:
         trail.pop(0)
     if len(trail) > 1:
         draw.aalines(screen, WHITE, False, trail)
 
-    dt = PI * 2 / len(waves)
     t += dt
 
-#endregion SKETCH
+#endregion
 
 
 if __name__ == '__main__':
@@ -207,6 +237,12 @@ if __name__ == '__main__':
     display.set_caption(TITLE)
     clock = Clock()
     setup()
+
+    if EXPORT:
+        try:
+            os.mkdir('export')
+        except FileExistsError:
+            pass
 
     # Loop
     running = True
@@ -222,7 +258,11 @@ if __name__ == '__main__':
 
         # Render
         show(screen)
+        if EXPORT:
+            image.save(screen, 'export/f_%04d.png' % frame)
         display.flip()
+
+        frame += 1
 
     # Quit
     pygame.quit()
