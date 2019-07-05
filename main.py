@@ -1,13 +1,20 @@
 import os
+
 from typing import List, Tuple, Iterator
+
 from math import sqrt, sin, cos, atan2
 from math import pi as PI
+
 import pygame
 import pygame.display as display
 import pygame.event as events
 import pygame.draw as draw
+import pygame.gfxdraw as gfxdraw
 import pygame.image as image
+import pygame.transform as transform
 from pygame.time import Clock
+
+from git_logo import git_logo
 
 
 # A simple 2-d vector or point implementation for utility purposes
@@ -156,14 +163,12 @@ def circle_t(t: float) -> Tuple[float, float]:
 
 #region Parameters
 
-# The path function to sample
-FUNC = square_t
-# How many samples to take of the path function
-SAMPLES = 200
-# How many trail points to keep at most
-TRAIL_LENGTH = SAMPLES - 10
+# Whether to perform a (poor quality) 2x zoom
+ZOOM = False
 # The radius of a path-tracing circle for amplitude 1
 SCALE = MINDIM / 2 - 100
+# How many trail points to keep at most
+trail_length = 1
 # The original sampled path to re-draw at the beginning of the draw loop
 original_path = []
 # The result of the discrete Fourier transform computed in setup
@@ -180,13 +185,15 @@ dt = 0
 
 # Calculates stuff and sets things up
 def setup() -> bool:
-    global original_path, waves, dt
+    global trail_length, original_path, waves, dt
 
-    sampled = list(sample(FUNC, SAMPLES))
+    #samples = list(sample(square_t, 200))
+    samples = git_logo
+    trail_length = len(samples) - 20
 
-    original_path = [(MIDDLE + Vec2d(*p) * SCALE).float_tuple for p in sampled]
+    original_path = [(MIDDLE + Vec2d(*p) * SCALE).float_tuple for p in samples]
 
-    fourier = dft([complex(*p) for p in sampled])
+    fourier = dft([complex(*p) for p in samples])
     waves = [Wave(k, X_k) for k, X_k in enumerate(fourier)]
     waves = sorted(waves, key=lambda w: w.amp, reverse=True)
 
@@ -208,21 +215,28 @@ def show(screen):
 
         # Circle
         radius = mapf(wave.amp, b=(0, SCALE))
-        draw.circle(screen, DARK_GREY, origin.int_tuple, int(max(2, radius)), 1)
+        #draw.circle(screen, DARK_GREY, origin.int_tuple, int(max(2, radius)), 1)
+        gfxdraw.aacircle(screen, int(origin.x), int(origin.y), int(max(2, radius)), DARK_GREY)
 
         # Line
-        angle = t * wave.freq + wave.phase - PI / 2
+        angle = t * wave.freq + wave.phase
         end_point = origin + (radius * cos(angle), radius * sin(angle))
-        draw.aaline(screen, LIGHT_GREY, origin.int_tuple, end_point.int_tuple)
+        draw.aaline(screen, WHITE, origin.int_tuple, end_point.int_tuple)
 
         origin = end_point
 
     # Trail
     trail.append(origin.float_tuple)
-    if len(trail) > TRAIL_LENGTH:
+    if len(trail) > trail_length:
         trail.pop(0)
     if len(trail) > 1:
-        draw.aalines(screen, WHITE, False, trail)
+        draw.aalines(screen, NICE_RED, False, trail)
+
+    # Zoom
+    if ZOOM:
+        scaled = transform.scale2x(screen)
+        screen.fill(BLACK)
+        screen.blit(scaled, (WIDTH / 2 - origin.x * 2, HEIGHT / 2 - origin.y * 2))
 
     t += dt
 
